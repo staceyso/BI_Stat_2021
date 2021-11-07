@@ -1,0 +1,551 @@
+---
+title: "The Olympic Games project"
+author: "Anastasia Tokareva"
+date: "07.11.2021"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+### 0. Install all the libraries needed
+
+```{r message=FALSE}
+library(dplyr)
+library(readr)
+library(ggplot2)
+```
+
+### 1. Select and bind the data from different data frames
+
+The data is divided into different files, which must have the same format and be stored in the same folder.
+At first, we need to merge this files to one data frame. You can change path to your own variant or store csv files in '../data/' directory:
+
+```{r message=FALSE, warning=FALSE}
+data_all <- list.files(path = "../data/", 
+                       pattern = "*.csv", 
+                       full.names = TRUE) %>% 
+  lapply(read_csv) %>%
+  bind_rows
+```
+
+
+### 2. Check if the data is correct (are there any NA or invalid values)
+
+We can use 'str' command to observe information about the dataframe:
+
+```{r}
+str(data_all)
+```
+
+Firstly, we need to deal with invalid values:
+
+#### 'Sex' variable
+
+This variable has 'chr' type and can possibly include 'F', 'M' or NA values. Therefore, we need to find observations that do not fulfill this condition:
+
+```{r}
+data_all %>% filter(!(Sex %in% c('F', 'M', NA)))
+```
+Pavel Mike and Anatoly Mikhaylin have 'G' in the sex column. Considering the fact that these are male names, we can change it to 'M'.
+
+```{r}
+data_all <- data_all %>% mutate(Sex = ifelse(Name == 'Pavel Mike', 'M', Sex))
+data_all <- data_all %>% mutate(Sex = ifelse(Name == 'Anatoly Mikhaylin', 'M', Sex))
+```
+
+We also noticed that for some participants there are more than 1 observation in a data frame, for the reason that some people participated in the Olympics several times. Considering that, we can use information from 1 observation to fill the gaps in another.
+
+```{r}
+data_all %>% filter(Sex %in% c(NA))
+```
+
+2 people with ID's 113716, 124516 were found.
+
+```{r}
+data_all %>% filter(ID %in% c(113716, 124516))
+```
+```{r}
+data_all <- data_all %>% mutate(Sex = ifelse(ID == '113716', 'M', Sex))
+```
+
+
+#### 'Age' variable
+```{r}
+data_all %>% filter(Age %in% c(NA))
+```
+The amount of NA's was too vast (9,476) to consider changing it manually. However, the proportion of observations with NA's in Age variable was only 3,5%, so we decided to leave it without changes.
+There might be different approaches to this problem. But I decided that this 3,5% lack of information is not significant enough to cause any problems later.
+
+The all-time record for the oldest Olympics competitor was 72 years, whereas the youngest competitor was 10 years old.
+
+```{r}
+data_all %>% filter(Age > 72)
+```
+We googled several names from the list and found out, that they are sculptors and artists, not sportsmen.
+Finally, the decision was made to replace this values with NA, so that our research would not include ages of 73 or above.
+
+```{r}
+data_all <- data_all %>% mutate(Age = ifelse(Age > 72, NA, Age))
+```
+
+In the next step we check if some of the competitors on the list are too young:
+
+```{r}
+data_all %>% filter(Age < 10)
+```
+No competitors younger than 10 were found.
+
+#### 'Height' variable
+
+```{r}
+data_all %>% filter(Height %in% c(NA))
+```
+The amount of NA's in Height variable equaled 60,172 and was significant enough. However, it would take too much time to replace them with values manually, and by replacing them with a mean value, we would make an assumption, that height does not depend on sex, age, sport and nationality. But that is not true. For that reason we decided to leave these NA's without any changes.
+
+#### 'Weight' variable
+
+```{r}
+data_all %>% filter(Weight %in% c(NA))
+```
+The amount of NA's in Weight variable was highly significant as well at exactly 62,876 observations. But for the same reason (as for height) we decided to leave these NA's without any changes.
+
+#### 'Sport' variable
+
+We summarized information about sport:
+```{r}
+data_all %>% group_by(Sport) %>% summarise()
+```
+A problem were found with football, because in the data frame were name "Footba" as well. We changed it:
+
+```{r}
+data_all <- data_all %>% 
+  mutate(Sport = ifelse(Sport == "Footba", 'Football', Sport))
+```
+
+
+#### 'Event' variable
+
+We summarized information about the events:
+```{r}
+data_all %>% group_by(Event) %>% summarise()
+```
+It is quite difficult to search for any invalid values, so we decided to leave this column. The same approach was chosen for variables Team, NOC, City, Year, Name.
+
+#### 'Season' variable
+```{r}
+data_all %>% filter(!(Season %in% c('Summer', 'Winter', NA)))
+```
+No invalid values.
+
+#### 'Medal' variable
+```{r}
+data_all %>% filter(!(Medal %in% c('Gold', 'Silver', 'Bronze', NA)))
+```
+Everything is OK with this column.
+
+### 3. Identifying the age of the youngest male and female sportsmen in the 1992 Olympic Games
+
+```{r}
+the_youngest_male_1992 <- data_all %>% filter(Year == 1992 & Sex == 'M') %>% filter(Age == min(Age, na.rm = TRUE))
+the_youngest_female_1992<- data_all %>% filter(Year == 1992 & Sex == 'F') %>% filter(Age == min(Age, na.rm = TRUE)) 
+```
+The youngest female competitor in 1992 was Judit Kiss at the age of 12, and the youngest male competitor in 1992 was Carlos Bienvenido Front Barrera at the age of 11.
+
+### 4. Average and standard deviation of the 'Height' variable for male and female competitors
+
+```{r, message=FALSE}
+average_sd_height <- data_all %>% group_by(Sex) %>% select(Height) %>%
+  summarise(across(.f = list(mean = mean, sd = sd), na.rm = T))
+```
+average for females = 167.842
+sd for females = 8.80343
+
+average for males = 178.859
+sd for males = 9.36034
+
+
+### 5. Average and standard deviation for 'Height' variable for females who played tennis on the Olympics in 2000 (round)
+
+```{r}
+average_female_tennis_2000 <- data_all %>% 
+  filter(Sex == 'F', Year == 2000, Sport == 'Tennis') %>% 
+  summarise(mean(Height, na.rm = TRUE))
+average_female_tennis_2000 <- round(average_female_tennis_2000[1,1], digits = 1)
+sd_female_tennis_2000 <- data_all %>% 
+  filter(Sex == 'F', Year == 2000, Sport == 'Tennis') %>% 
+  summarise(sd(Height, na.rm = TRUE))
+sd_female_tennis_2000 <- round(sd_female_tennis_2000[1,1], digits = 1)
+```
+
+average = 171.8
+sd = 6.5
+
+### 6. Identifying the spors type of the heaviest competitor in 2006
+
+```{r}
+the_heaviest_competitor_2006 <- data_all %>% 
+  filter(Year == 2006) %>% 
+  filter(Weight == max(Weight, na.rm = TRUE))
+```
+
+The heaviest competitor in 2006 was Patrick R. Antaki with a weight of 127kg, he participated in Skeleton (Men's Skeleton).
+
+### 7. The number of Golden medals won by females between 1980 and 2010
+
+```{r}
+golden_females_1980_2010 <- nrow(data_all %>% 
+  filter(Sex == 'F' & (Year >= 1980 & Year <= 2010) & Medal == 'Gold'))
+```
+
+Between 1980 and 2010 female competitors won 2249 Golden medals.
+
+### 8. How many times have John Aalberg participated in the Olympics (in different years)
+
+```{r}
+john_aalberg <- data_all %>% filter(Name == 'John Aalberg')
+john_aalberg_times <- nrow(john_aalberg)
+john_aalberg_years <- unique(select(john_aalberg, Year))
+```
+John Aalberg participated in the Olympic Games 8 times, in 1992 and 1994.
+
+### 9. Identifying the most and the least represented age groups in the Olympic Games - 2008
+The age groups: [15-25), [25-35), [35-45), [45-55]
+
+```{r}
+age_groups <- table(cut(data_all$Age, seq(15, 55, by=10), left = T, right=F, include.lowest=T))
+age_groups
+```
+
+The biggest age group is [15-25), consisting of 130056 competitors, and the smallest one is [45,55], containing only 3377 competitors.
+
+### 10. To what extense the number of sports changed between 1994 and 2002
+
+```{r}
+sports_1994 <- unique(data_all %>% filter(Year == '1994') %>% select(Sport))
+sports_2002 <- unique(data_all %>% filter(Year == '2002') %>% select(Sport))
+change_between_1994_and_2002 <- nrow(sports_1994) - nrow(sports_2002)
+```
+
+Between 1994 and 2002 the number of sports increased by 3.
+
+### 11. Top-3 countries for each season and for each type of medals
+
+Considering the fact that several teams in a data frame may represent 1 country, it is better to group by NOC(National Olympic Committees).
+
+Winter:
+
+```{r}
+gold_winter <- data_all %>% 
+  filter(Medal == 'Gold' & Season == 'Winter') %>% 
+  group_by(NOC) %>% 
+  summarise(Count = n()) %>% 
+  arrange(-Count) %>%
+  slice_head(n = 3)
+
+silver_winter <- data_all %>% 
+  filter(Medal == 'Silver' & Season == 'Winter') %>% 
+  group_by(NOC) %>% 
+  summarise(Count = n()) %>% 
+  arrange(-Count) %>%
+  slice_head(n = 3)
+
+bronze_winter <- data_all %>% 
+  filter(Medal == 'Bronze' & Season == 'Winter') %>% 
+  group_by(NOC) %>% 
+  summarise(Count = n()) %>% 
+  arrange(-Count) %>%
+  slice_head(n = 3)
+
+gold_winter
+silver_winter
+bronze_winter
+```
+
+Top-3 countries in winter:
+a)Golden:
+  1)Canada (305)
+  2)USSR (250)
+  3)USA (166)
+b)Silver:
+  1)USA (308)
+  2)Canada (199)
+  3)Norway (165)
+c)Bronze:
+  1)Finland (215)
+  2)Sweden(177)
+  3)USA (161)
+
+Summer:
+
+```{r}
+gold_summer <- data_all %>% 
+  filter(Medal == 'Gold' & Season == 'Summer') %>% 
+  group_by(NOC) %>% 
+  summarise(Count = n()) %>% 
+  arrange(-Count) %>%
+  slice_head(n = 3)
+
+silver_summer <- data_all %>% 
+  filter(Medal == 'Silver' & Season == 'Summer') %>% 
+  group_by(NOC) %>% 
+  summarise(Count = n()) %>% 
+  arrange(-Count) %>%
+  slice_head(n = 3)
+
+bronze_summer <- data_all %>% 
+  filter(Medal == 'Bronze' & Season == 'Summer') %>% 
+  group_by(NOC) %>% 
+  summarise(Count = n()) %>% 
+  arrange(-Count) %>%
+  slice_head(n = 3)
+
+gold_summer
+silver_summer
+bronze_summer
+```
+
+Top-3 countries in summer:
+a)Golden:
+  1)USA (2472)
+  2)USSR (832)
+  3)Great Britain (636)
+b)Silver:
+  1)USA (1333)
+  2)Great Britain (729)
+  3)USSR (635)
+c)Bronze:
+  1)USA (1197)
+  2)Germany (649)
+  3)Great Britain (620)
+
+### 12. Create new variable 'Height_z_scores' (height standartization)
+
+```{r}
+data_all$Height_z_scores <- scale(data_all$Height)
+```
+
+### 13. Min/Max normalization
+```{r}
+min_max_normalization <- function(x) {
+  (x - min(x, na.rm = TRUE)) / (max(x, na.rm = TRUE) - min(x, na.rm = TRUE))
+}
+data_all$Height_min_max_normalized <- min_max_normalization(data_all$Height)
+```
+
+### 14. Height, Weight and Age comparison for males and females in the Olympic Games in winter
+
+At first, we created 2 new data frames for male and female competitors in winter:
+```{r}
+males_winter <- data_all %>% 
+  filter(Season == 'Winter' & Sex == 'M') %>% 
+  select(Height, Weight, Age)
+females_winter <- data_all %>% 
+  filter(Season == 'Winter' & Sex == 'F') %>% 
+  select(Height, Weight, Age)
+```
+
+#### Height comparison
+
+Normality tests (work only for 3-5000 values, therefore we needed to create a slice):
+
+```{r, message=FALSE}
+shapiro.test(males_winter$Height[0:5000])
+shapiro.test(females_winter$Height[0:5000])
+```
+
+1)W = 0.9944, p-value = 3.75e-11
+2)W = 0.9951, p-value = 4.52e-11
+
+Therefore, according to Shapiro-Wilk normality test, the distribution is not normal. Nevertheless, the results might be incorrect, according to the fact that we processed not the whole data frame.
+
+Q-Q plots were drawn to check the normality:
+
+```{r}
+qqnorm(males_winter$Height)
+qqline(males_winter$Height, col = "blue", lwd = 2)
+```
+
+```{r}
+qqnorm(females_winter$Height)
+qqline(females_winter$Height, col = "magenta", lwd = 2)
+```
+
+The distribution was considered normal in both cases.
+
+Used F test to compare two variances:
+```{r, message=FALSE}
+var.test(females_winter$Height, males_winter$Height)
+```
+F = 0.8394, num df = 13522, denom df = 26726,
+p-value <2e-16
+
+Therefore, there is a statistically significant difference between variances, and we need to use Welch Two Sample t-test.
+Firstly, we used two-sided t-test:
+
+```{r, message=FALSE}
+t.test(x=females_winter$Height, y=males_winter$Height, alternative = c("two.sided"), var.equal = FALSE)
+```
+t = -184.8, df = 29342, p-value <2e-16
+
+The differences are statistically significant (p-value is below the chosen threshold of 0.05), therefore we can reject the null hypothesis ('There is no difference between males and females height') in favor of the alternative hypothesis ('There is a statistically significant difference between males and females height')
+
+Secondly, we used one-tailed t-test:
+
+```{r, message=FALSE}
+t.test(x=females_winter$Height, y=males_winter$Height, alternative = c("less"), var.equal = FALSE)
+```
+
+t = -184.8, df = 29342, p-value <2e-16
+
+Again, the differences are statistically significant (p-value is below the chosen threshold of 0.05), therefore we can reject the null hypothesis ('There is no difference between males and females height') in favor of the alternative hypothesis ('Males are generally higher than females')
+
+Boxplot was drawn to visualize the information:
+
+```{r, warning=FALSE}
+df_for_plots_14 <- data_all %>% 
+  filter(Season == 'Winter') %>% 
+  select(Sex, Height, Weight, Age)
+ggplot(df_for_plots_14, aes(Height, color=Sex)) +
+  geom_boxplot() +
+  scale_color_hue(labels = c("female", "male")) +
+  theme_bw() +
+  labs(title="Height depending on sex")
+```
+
+#### Weight comparison
+
+Normality tests (work only for 3-5000 values, therefore we needed to create a slice):
+
+```{r, message=FALSE}
+shapiro.test(males_winter$Weight[0:5000])
+shapiro.test(females_winter$Weight[0:5000])
+```
+
+1)W = 0.9798, p-value <2e-16
+2)W = 0.9885, p-value <2e-16
+
+Therefore, according to Shapiro-Wilk normality test, the distribution is not normal. Nevertheless, the results might be incorrect, according to the fact that we processed not the whole data frame.
+
+Q-Q plots were drawn to check the normality:
+
+```{r}
+qqnorm(males_winter$Weight)
+qqline(males_winter$Weight, col = "blue", lwd = 2)
+```
+
+```{r}
+qqnorm(females_winter$Weight)
+qqline(females_winter$Weight, col = "magenta", lwd = 2)
+```
+
+The distribution was considered normal in both cases.
+
+Used F test to compare two variances:
+```{r, message=FALSE}
+var.test(females_winter$Weight, males_winter$Weight)
+```
+
+F = 0.4669, num df = 13333, denom df = 26208,
+p-value <2e-16
+
+Therefore, there is a statistically significant difference between variances, and we need to use Welch Two Sample t-test.
+
+Firstly, we used two-sided t-test:
+
+```{r, message=FALSE}
+t.test(x=females_winter$Weight, y=males_winter$Weight, alternative = c("two.sided"), var.equal = FALSE)
+```
+
+t = -187.8, df = 36296, p-value <2e-16
+
+The differences are statistically significant (p-value is below the chosen threshold of 0.05), therefore we can reject the null hypothesis ('There is no difference between males and females weight') in favor of the alternative hypothesis ('There is a statistically significant difference between males and females weight')
+
+Secondly, we used one-tailed t-test:
+
+```{r, message=FALSE}
+t.test(x=females_winter$Weight, y=males_winter$Weight, alternative = c("less"), var.equal = FALSE)
+```
+
+t = -187.8, df = 36296, p-value <2e-16
+
+Again, the differences are statistically significant (p-value is below the chosen threshold of 0.05), therefore we can reject the null hypothesis ('There is no difference between males and females weight') in favor of the alternative hypothesis ('Males are generally have greater weight than females')
+
+Boxplot was drawn to visualize the information:
+
+```{r, warning=FALSE}
+ggplot(df_for_plots_14, aes(Weight, color=Sex)) +
+  geom_boxplot() +
+  scale_color_hue(labels = c("female", "male")) +
+  theme_bw() +
+  labs(title="Weight depending on sex")
+```
+
+#### Age comparison
+
+Normality tests (work only for 3-5000 values, therefore we needed to create a slice):
+
+```{r, message=FALSE}
+shapiro.test(males_winter$Age[0:5000])
+shapiro.test(females_winter$Age[0:5000])
+```
+
+1)W = 0.9626, p-value <2e-16
+2)W = 0.981, p-value <2e-16
+
+Therefore, according to Shapiro-Wilk normality test, the distribution is not normal. Nevertheless, the results might be incorrect, according to the fact that we processed not the whole data frame.
+
+Q-Q plots were drawn to check the normality:
+
+```{r}
+qqnorm(males_winter$Age)
+qqline(males_winter$Age, col = "blue", lwd = 2)
+```
+
+```{r}
+qqnorm(females_winter$Age)
+qqline(females_winter$Age, col = "magenta", lwd = 2)
+```
+
+The distribution was considered normal in both cases.
+
+Used F test to compare two variances:
+```{r, message=FALSE}
+var.test(females_winter$Age, males_winter$Age)
+```
+
+F = 0.9763, num df = 15072, denom df = 33205,
+p-value = 0.0856
+
+Therefore, there is no statistically significant difference between variances (p-value > 0.05), and we need to use Student Two Sample t-test.
+
+Firstly, we used two-sided t-test:
+
+```{r, message=FALSE}
+t.test(x=females_winter$Age, y=males_winter$Age, alternative = c("two.sided"), var.equal = TRUE)
+```
+
+t = -32.09, df = 48277, p-value <2e-16
+
+The differences are statistically significant (p-value is below the chosen threshold of 0.05), therefore we can reject the null hypothesis ('There is no difference between the age of male and female competitors') in favor of the alternative hypothesis ('There is a statistically significant difference between the age of male and female competitors')
+
+Secondly, we used one-tailed t-test:
+
+```{r, message=FALSE}
+t.test(x=females_winter$Age, y=males_winter$Age, alternative = c("less"), var.equal = TRUE)
+```
+
+t = -32.09, df = 48277, p-value <2e-16
+
+Again, the differences are statistically significant (p-value is below the chosen threshold of 0.05), therefore we can reject the null hypothesis ('There is no difference between between the age of male and female competitors') in favor of the alternative hypothesis ('Males competitors are generally older than female')
+
+Boxplot was drawn to visualize the information:
+
+```{r, warning=FALSE}
+ggplot(df_for_plots_14, aes(Age, color=Sex)) +
+  geom_boxplot() +
+  scale_color_hue(labels = c("female", "male")) +
+  theme_bw() +
+  labs(title="Age depending on sex")
+```
