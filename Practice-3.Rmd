@@ -1,0 +1,724 @@
+---
+title: "Practice #3"
+author: "Y.Burankova, A.Tokareva, M.Fofanov"
+date: "24.11.2021"
+output: 
+  html_document:
+    df_print: paged
+    toc: true
+    toc_float:
+      collapsed: true
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+options(scipen = 1, digits = 6)
+
+```
+
+# Import and data checking
+
+## Import required library
+**tidyverse** library ver. 1.3.1 is used for processing data.\
+
+```{r message=FALSE, warning=FALSE, include=FALSE}
+library(tidyverse)
+```
+
+This library include all required libraries:\
+- **ggplot2** 3.3.3, for data visualization.\
+- **dplyr** 1.0.5, for data manipulation.\
+- **tidyr** 1.1.3, for data tidying.\
+- **readr** 1.4.0, for data import.\
+- **purrr** 0.3.4, for functional programming.\
+as well as tibble ver. 3.1.0, stringr ver 1.4.0, ver. forcats 0.5.1
+
+## 1. Import .csv data
+### Function for reading .csv files and writing it to just one .csv file
+
+Function for reading all files with the required format (in this case mainly .csv) on a given path and writing all this data into one 'all_in_one.csv' file in the same folder.
+
+The function also returns data from the resulting 'all_in_one.csv' file.
+
+```{r echo=TRUE, message=FALSE, warning=FALSE}
+read_patients_data <- function(path, file_type) {
+  list.files(path = path, 
+             pattern = paste('*.', file_type, sep=''), 
+             full.names = TRUE) %>% 
+    map_df(~read_csv(., col_types = cols(.default = "c"))) %>% 
+    distinct(.) %>% 
+    write_csv(., paste(path, "all_in_one.csv", sep=''))
+  
+  return(read_csv(paste(path, "all_in_one.csv", sep='')))
+}
+```
+
+We load data from all .csv files into one variable using the above function. In our case, the data is in the './Data/' folder.
+
+```{r echo=TRUE, message=FALSE, warning=FALSE, include=FALSE}
+patients <- read_patients_data(path = "./Data/", file_type = "csv")
+```
+
+There are `r nrow(patients)` rows and `r ncol(patients)` variables in the data.
+
+## 2. Check and fix the data
+
+For each column, we check for wrong values:\
+- if we know the missing (incorrectly recorded) value - we change it.\
+- if we don`t know  - change to NA.\
+
+Thus, we will save the maximum information about each of the patients.
+
+The data:
+```{r echo=FALSE}
+head(patients)
+```
+
+### X1 column
+This column is present in the initial data, but does not carry any information other than the order in which patient data is written to the files. We can remove it.
+
+```{r include=FALSE}
+patients <- patients %>% select(-1)
+```
+
+### 'gender' column 
+We check it for missing and incorrectly entered values and transform it to factor.
+
+We have several incorrectly entered values, let's correct it and transform column to factor.
+```{r include=FALSE}
+patients %>% filter(!(gender %in% c('female', 'male', NA)))
+patients <- patients %>% mutate(gender = ifelse(gender == 'malle', 'male', gender))
+patients <- patients %>% mutate(gender = factor(gender))
+```
+
+There are `r patients %>% filter(is.na(gender)) %>% summarise(n()) %>% .[1,1,1]` NA values in this column.
+
+### 'age' column 
+Check it for missing and incorrectly entered values and transform to numeric.
+
+We have several incorrectly entered values (not a numbers), let's correct it and transform column to factor.
+```{r echo=FALSE}
+patients %>% filter(!grepl('^[[:digit:]]+$', age))
+patients <- patients %>% mutate(age = ifelse(age == 'thirty-one', 31, age)) %>% 
+  mutate(age = ifelse(!grepl('^[[:digit:]]+$', age), NA, age))
+
+patients <- patients %>% mutate(age = as.numeric(age))
+```
+
+Let's check if the entered values (outliers, more then +- 3 sd) are wrong. Since we cannot correct these values to valid, we correct them to NA.
+```{r echo=FALSE}
+patients %>% 
+  filter(age > mean(age) + 3 * sd(age) | age < mean(age) - 3 * sd(age))
+
+patients <- patients %>% 
+  mutate(age = ifelse(age > mean(age) + 3 * sd(age) | age < mean(age) - 3 * sd(age), NA, age))
+
+```
+
+There are `r patients %>% filter(is.na(age)) %>% summarise(n()) %>% .[1,1,1]` NA values in this column.
+
+### 'drug_type' column 
+Check it and transform to factor.
+```{r echo=FALSE}
+patients %>% group_by(drug_type) %>% summarise(number_observations = n())
+patients <- patients %>% mutate(drug_type = factor(drug_type))
+```
+
+There are `r patients %>% filter(is.na(drug_type)) %>% summarise(n()) %>% .[1,1,1]` NA values in this column.
+
+### 'is_relapse' column 
+
+```{r echo=FALSE}
+patients %>% group_by(is_relapse) %>% summarise(number_observations = n())
+patients <- patients %>% 
+  mutate(is_relapse = factor(is_relapse,
+                             levels = c(0, 1),
+                             labels = c("not_relapsed", "relapsed")))
+
+```
+Check it and transform to factor with two labels: "not_relapsed", "relapsed".
+
+There are `r patients %>% filter(is.na(is_relapse)) %>% summarise(n()) %>% .[1,1,1]` NA values in this column.
+
+### 'id' column 
+Transform it to numeric and move it to the beginning of the dataset.
+```{r include=FALSE}
+patients <- transform(patients, id = as.numeric(id))
+patients <- patients %>% relocate(id)
+
+```
+
+There are `r patients %>% filter(is.na(id)) %>% summarise(n()) %>% .[1,1,1]` NA values in this column.
+
+### 'days_in_hospital' column 
+Check it for missing and incorrectly entered values and transform to numeric.
+
+```{r echo=FALSE}
+patients %>% 
+  filter(!grepl('^[[:digit:]]+.[[:digit:]]+$', days_in_hospital))
+patients <- patients %>% mutate(days_in_hospital = as.numeric(days_in_hospital))
+```
+
+There are `r patients %>% filter(is.na(days_in_hospital)) %>% summarise(n()) %>% .[1,1,1]` NA values in this column.
+
+## EDA
+The data:
+```{r echo=FALSE}
+head(patients)
+```
+
+```{r message=FALSE, warning=FALSE, include=FALSE}
+patients %>% 
+  group_by(gender) %>% 
+  summarise(n = n()) %>% 
+  ggplot(aes(x = gender, y = n)) +
+  geom_col(alpha = 0.3, fill = 'Orange') +
+  geom_text(aes(label = n, fontface = "bold"), 
+            position = position_stack(vjust = 0.5)) +
+  labs(y='Number of patients',
+       x='Gender',
+       title="Number of patients of each gender") + 
+  theme_set(theme_bw())
+```
+
+
+```{r echo=FALSE, message=FALSE, warning=FALSE}
+## gender content
+patients %>% 
+  group_by(gender) %>% 
+  summarise(n = n()) %>% 
+  ggplot(aes(x = gender, y = n)) +
+  geom_col(alpha = 0.3, fill = 'Orange') +
+  geom_text(aes(label = n, fontface = "bold"), 
+            position = position_stack(vjust = 0.5)) +
+  labs(y='Number of patients',
+       x='Gender',
+       title="Patients of each gender") + 
+  theme_set(theme_bw())
+
+## Patients in drug groups
+
+patients %>% 
+  ggplot(aes(y = drug_type, fill = gender)) +
+  geom_histogram(stat="count", alpha = 0.3) + 
+  geom_text(aes(label = ..count.., fontface = "bold"), 
+            stat = "count", 
+            position = position_stack(vjust = 0.5)) +
+  scale_y_discrete(labels = c('New type 1', 'New type 2', 'Old type', 'Placebo')) +
+  labs(x='Number of patients',
+       y='Drug type',
+       title="Patients of each gender in drug groups") + 
+  theme_set(theme_bw())
+
+```
+
+We have the same number of patients in groups of different sex and in groups who took different drugs.
+
+Outcomes in different drug groups:
+
+```{r echo=FALSE, message=FALSE, warning=FALSE}
+patients %>% 
+  filter(!is.na(is_relapse)) %>% 
+  ggplot(aes(drug_type, fill = is_relapse, color = is_relapse)) +
+  geom_histogram(stat="count", alpha = 0.3) +
+  geom_text(aes(label = ..count.., fontface = "bold"), 
+            stat = "count", 
+            position = position_stack(vjust = 0.5)) +
+  scale_x_discrete(labels = c('New type 1', 'New type 2', 'Old type', 'Placebo')) +
+  labs(title="Outcomes in different drug groups", 
+       x = 'Patients age',
+       y = 'Number of patients', 
+       color = "Was there a relapse?",
+       fill = "Was there a relapse?") + 
+  theme_set(theme_bw())
+```
+
+
+### Age distribution
+
+```{r echo=FALSE, message=FALSE, warning=FALSE}
+patients %>% 
+  ggplot(aes(age)) +
+    geom_density(aes(fill = gender, color = gender), alpha = 0.3) +
+    labs(title="Age of female and male patients", 
+         x = 'Patients age') + 
+  theme_set(theme_bw())
+```
+
+```{r include=FALSE}
+spariro_names <- c('all patients',
+                   'female patients',
+                   'male patients')
+spariro_statistics <- c(shapiro.test(patients$age)$statistic, 
+                        shapiro.test(patients[patients$gender == 'female',]$age)$statistic, 
+                        shapiro.test(patients[patients$gender == 'male',]$age)$statistic)
+spariro_pvalues <- c(shapiro.test(patients$age)$p.value, 
+                     shapiro.test(patients[patients$gender == 'female',]$age)$p.value, 
+                     shapiro.test(patients[patients$gender == 'male',]$age)$p.value)
+shapiro_num_obs <- c(filter(patients, !is.na(age)) %>% 
+                       summarise(n()) %>% .[1,1,1],
+                     filter(patients, !is.na(age) & gender == 'female') %>% 
+                       summarise(n()) %>% .[1,1,1],
+                     filter(patients, !is.na(age) & gender == 'male') %>% 
+                       summarise(n()) %>% .[1,1,1])
+
+age_normality_test <- data.frame(spariro_names, shapiro_num_obs, spariro_statistics, spariro_pvalues)
+
+names(age_normality_test) <- c('Group', 
+                               'Number of observations',
+                               'W statistics', 
+                               'p_value') 
+
+age_normality_test <- age_normality_test %>% 
+  mutate(Distribution = ifelse(p_value < 0.05, 'Not normal', 'Normal'))
+```
+
+
+We have done the Shapiro-Wilk normality test for Age of patients. The results of group age distribution, number of observations, p-values and W statistics: 
+```{r echo=FALSE}
+age_normality_test
+```
+
+```{r echo=FALSE, message=FALSE, warning=FALSE}
+patients %>% 
+  filter(!is.na(age)) %>%
+  ggplot(aes(y = age, x = gender)) +
+  geom_boxplot(na.rm = TRUE, aes(fill = factor(gender))) +
+  stat_boxplot(geom = "errorbar", width = 0.5) +  
+  stat_summary(na.rm = TRUE, fun = mean, colour = "darkred", geom = "point", 
+               size = 3) +
+  stat_summary(na.rm = TRUE, fun = mean, geom = "text", 
+               vjust=-0.7, aes(label = round(..y.., digits=1))) +
+  scale_fill_discrete(name = "Gender", labels = c("female", "male")) +
+  stat_summary(geom="text", fun=quantile,
+               aes(label=sprintf("%1.1f", ..y..)),
+               position=position_nudge(x=0.45), size=3.5) +
+  theme_bw() +
+  labs(title="Age of patients",
+       subtitle = 'Mean are marked on the graph center')
+```
+
+On the side of each graph are indicated: maximum value, 3rd quartile, median, 1st quartile, minimum value.
+
+### Days in hospital distribution
+
+```{r echo=FALSE, message=FALSE, warning=FALSE}
+patients %>% 
+  ggplot() +
+  geom_density(aes(days_in_hospital), color = 'Black', alpha = 0.3) +
+  geom_density(aes(days_in_hospital, fill = gender, color = gender), alpha = 0.1) +
+  labs(title="Days in hospital distribution",
+       subtitle = 'Black - gender-disregarded distribution',
+       x = 'Days in hospital', 
+       color = "Gender",
+       fill = "Gender") +
+  theme_set(theme_bw())
+```
+
+We have done the Shapiro-Wilk normality test for number of days in hospital for patients. The results of group distribution, number of observations, p-values and W statistics: 
+
+```{r echo=FALSE, message=FALSE, warning=FALSE}
+spariro_names_days <- c('all patients',
+                        'female patients',
+                        'male patients')
+spariro_statistics_days <- c(shapiro.test(patients$days_in_hospital)$statistic, 
+                        shapiro.test(patients[patients$gender == 'female',]$days_in_hospital)$statistic, 
+                        shapiro.test(patients[patients$gender == 'male',]$days_in_hospital)$statistic)
+spariro_pvalues_days <- c(shapiro.test(patients$days_in_hospital)$p.value, 
+                     shapiro.test(patients[patients$gender == 'female',]$days_in_hospital)$p.value, 
+                     shapiro.test(patients[patients$gender == 'male',]$days_in_hospital)$p.value)
+shapiro_num_obs_days <- c(filter(patients, !is.na(days_in_hospital)) %>% 
+                       summarise(n()) %>% .[1,1,1],
+                     filter(patients, !is.na(days_in_hospital) & gender == 'female') %>% 
+                       summarise(n()) %>% .[1,1,1],
+                     filter(patients, !is.na(days_in_hospital) & gender == 'male') %>% 
+                       summarise(n()) %>% .[1,1,1])
+
+days_normality_test <- data.frame(spariro_names_days, 
+                                  shapiro_num_obs_days, 
+                                  spariro_statistics_days, 
+                                  spariro_pvalues_days)
+
+names(days_normality_test) <- c('Group', 
+                               'Number of observations',
+                               'W statistics', 
+                               'p_value') 
+
+days_normality_test <- days_normality_test %>% 
+  mutate(Distribution = ifelse(p_value < 0.05, 'Not normal', 'Normal'))
+days_normality_test
+```
+
+```{r echo=FALSE, message=FALSE, warning=FALSE}
+patients %>% 
+  filter(!is.na(days_in_hospital)) %>%
+  ggplot(aes(y = days_in_hospital, x = gender)) +
+  geom_boxplot(na.rm = TRUE, aes(fill = factor(gender))) +
+  stat_boxplot(geom = "errorbar", width = 0.5) +  
+  stat_summary(na.rm = TRUE, fun = mean, colour = "darkred", geom = "point", 
+               size = 3) +
+  stat_summary(na.rm = TRUE, fun = mean, geom = "text", 
+               vjust=-0.7, aes(label = round(..y.., digits = 1))) +
+  scale_fill_discrete(name = "Gender", labels = c("female", "male")) +
+  stat_summary(geom="text", fun=quantile,
+               aes(label=sprintf("%1.1f", ..y..)),
+               position=position_nudge(x=0.45), size=3.5) +
+  theme_bw() +
+  labs(title="Days in hospital",
+       subtitle = 'Mean are marked on the graph center',
+       x = 'Gender',
+       y = 'Number of days in hospital')
+```
+
+On the side of each graph are indicated: maximum value, 3rd quartile, median, 1st quartile, minimum value.
+
+### Days in hospital distribution for different drug types
+
+#### Female patients
+
+```{r echo=FALSE, message=FALSE, warning=FALSE}
+patients %>% 
+  filter(gender == 'female') %>% 
+  ggplot() +
+  geom_density(aes(days_in_hospital, 
+                   fill = drug_type, 
+                   color = drug_type), 
+               alpha = 0.1) +
+  labs(title="Days in hospital distribution for female patients",
+       subtitle = 'for different types of drugs',
+       x = 'Days in hospital', 
+       color = "Drug type",
+       fill = "Drug type") +
+  theme_set(theme_bw())
+
+```
+
+We have done the Shapiro-Wilk normality test for number of days in hospital for female patients. The results of group distribution, number of observations, p-values and W statistics: 
+
+```{r echo=FALSE, message=FALSE, warning=FALSE}
+spariro_fe_days <- c('New type 1', 
+                     'New type 2', 
+                     'Old type', 
+                     'Placebo')
+spariro_stat_fe_days <- c(shapiro.test(patients[
+  patients$gender == 'female' & patients$drug_type == 'New_type_1',
+  ]$days_in_hospital)$statistic, 
+  shapiro.test(patients[
+    patients$gender == 'female' & patients$drug_type == 'New_type_2',
+  ]$days_in_hospital)$statistic, 
+  shapiro.test(patients[
+    patients$gender == 'female' & patients$drug_type == 'Old_type',
+  ]$days_in_hospital)$statistic, 
+  shapiro.test(patients[
+    patients$gender == 'female' & patients$drug_type == 'Placebo',
+  ]$days_in_hospital)$statistic)
+
+spariro_pval_fe_days <- c(shapiro.test(patients[
+  patients$gender == 'female' & patients$drug_type == 'New_type_1',
+]$days_in_hospital)$p.value, 
+shapiro.test(patients[
+  patients$gender == 'female' & patients$drug_type == 'New_type_2',
+]$days_in_hospital)$p.value, 
+shapiro.test(patients[
+  patients$gender == 'female' & patients$drug_type == 'Old_type',
+]$days_in_hospital)$p.value, 
+shapiro.test(patients[
+  patients$gender == 'female' & patients$drug_type == 'Placebo',
+]$days_in_hospital)$p.value)
+
+spariro_obs_fe_days <- c(filter(patients, 
+                                !is.na(days_in_hospital) & 
+                                         gender == 'female' &
+                                         drug_type == 'New_type_1') %>% 
+                            summarise(n()) %>% .[1,1,1],
+                         filter(patients, 
+                                !is.na(days_in_hospital) & 
+                                         gender == 'female' &
+                                         drug_type == 'New_type_2') %>% 
+                           summarise(n()) %>% .[1,1,1],
+                         filter(patients, 
+                                !is.na(days_in_hospital) & 
+                                         gender == 'female' &
+                                         drug_type == 'Old_type') %>% 
+                           summarise(n()) %>% .[1,1,1],
+                         filter(patients, 
+                                !is.na(days_in_hospital) & 
+                                         gender == 'female' &
+                                         drug_type == 'Placebo') %>% 
+                           summarise(n()) %>% .[1,1,1])
+
+fe_days_normality_test <- data.frame(spariro_fe_days, 
+                                     spariro_obs_fe_days,
+                                     spariro_stat_fe_days, 
+                                     spariro_pval_fe_days)
+
+fe_days_normality_test <- data.frame(spariro_fe_days, 
+                                     spariro_obs_fe_days,
+                                     spariro_stat_fe_days, 
+                                     spariro_pval_fe_days,
+                                     c('','','',''))
+
+names(fe_days_normality_test) <- c('Female Group', 
+                                'Number of observations',
+                                'W statistics', 
+                                'p_value',
+                                'Distribution') 
+
+fe_days_normality_test <- fe_days_normality_test %>% 
+  mutate(Distribution = ifelse(p_value < 0.05, 'Not normal', 'Normal'))
+
+fe_days_normality_test
+```
+
+
+```{r echo=FALSE, message=FALSE, warning=FALSE, paged.print=TRUE}
+patients %>% 
+  filter(!is.na(days_in_hospital) & gender == 'female') %>%
+  ggplot(aes(y = days_in_hospital, x = drug_type)) +
+  geom_boxplot(na.rm = TRUE, aes(fill = factor(drug_type))) +
+  stat_boxplot(geom = "errorbar", width = 0.5) +  
+  stat_summary(na.rm = TRUE, fun = mean, colour = "darkred", geom = "point", 
+               size = 3) +
+  stat_summary(na.rm = TRUE, fun = mean, geom = "text", 
+               vjust=-0.7, aes(label = round(..y.., digits = 1))) +
+  scale_fill_discrete(name = "Drug type", labels = c('New type 1', 
+                                                  'New type 2', 
+                                                  'Old type', 
+                                                  'Placebo')) +
+  stat_summary(geom="text", fun=quantile,
+               aes(label=sprintf("%1.1f", ..y..)),
+               position=position_nudge(x=0.45), size=3.5) +
+  theme_bw() +
+  labs(title="Days in hospital for female patients",
+       subtitle = 'Mean are marked on the graph center',
+       x = 'Drug type',
+       y = 'Days in hospital')
+
+```
+
+On the side of each graph are indicated: maximum value, 3rd quartile, median, 1st quartile, minimum value.
+
+#### Male patients
+
+```{r echo=FALSE, message=FALSE, warning=FALSE}
+patients %>% 
+  filter(gender == 'male') %>% 
+  ggplot() +
+  geom_density(aes(days_in_hospital, 
+                   fill = drug_type, 
+                   color = drug_type), 
+               alpha = 0.1) +
+  labs(title="Days in hospital distribution for male patients",
+       subtitle = 'for different types of drugs',
+       x = 'Days in hospital', 
+       color = "Drug type",
+       fill = "Drug type") +
+  theme_set(theme_bw())
+```
+
+We have done the Shapiro-Wilk normality test for number of days in hospital for female patients. The results of group distribution, number of observations, p-values and W statistics: 
+
+```{r echo=FALSE, message=FALSE, warning=FALSE}
+
+spariro_ma_days <- c('New type 1', 
+                     'New type 2', 
+                     'Old type', 
+                     'Placebo')
+spariro_stat_ma_days <- c(shapiro.test(patients[
+  patients$gender == 'male' & patients$drug_type == 'New_type_1',
+]$days_in_hospital)$statistic, 
+shapiro.test(patients[
+  patients$gender == 'male' & patients$drug_type == 'New_type_2',
+]$days_in_hospital)$statistic, 
+shapiro.test(patients[
+  patients$gender == 'male' & patients$drug_type == 'Old_type',
+]$days_in_hospital)$statistic, 
+shapiro.test(patients[
+  patients$gender == 'male' & patients$drug_type == 'Placebo',
+]$days_in_hospital)$statistic)
+
+spariro_pval_ma_days <- c(shapiro.test(patients[
+  patients$gender == 'male' & patients$drug_type == 'New_type_1',
+]$days_in_hospital)$p.value, 
+shapiro.test(patients[
+  patients$gender == 'male' & patients$drug_type == 'New_type_2',
+]$days_in_hospital)$p.value, 
+shapiro.test(patients[
+  patients$gender == 'male' & patients$drug_type == 'Old_type',
+]$days_in_hospital)$p.value, 
+shapiro.test(patients[
+  patients$gender == 'male' & patients$drug_type == 'Placebo',
+]$days_in_hospital)$p.value)
+
+spariro_obs_ma_days <- c(filter(patients, 
+                                !is.na(days_in_hospital) & 
+                                  gender == 'male' &
+                                  drug_type == 'New_type_1') %>% 
+                           summarise(n()) %>% .[1,1,1],
+                         filter(patients, 
+                                !is.na(days_in_hospital) & 
+                                  gender == 'male' &
+                                  drug_type == 'New_type_2') %>% 
+                           summarise(n()) %>% .[1,1,1],
+                         filter(patients, 
+                                !is.na(days_in_hospital) & 
+                                  gender == 'male' &
+                                  drug_type == 'Old_type') %>% 
+                           summarise(n()) %>% .[1,1,1],
+                         filter(patients, 
+                                !is.na(days_in_hospital) & 
+                                  gender == 'male' &
+                                  drug_type == 'Placebo') %>% 
+                           summarise(n()) %>% .[1,1,1])
+
+ma_days_normality_test <- data.frame(spariro_ma_days, 
+                                     spariro_obs_ma_days,
+                                     spariro_stat_ma_days, 
+                                     spariro_pval_ma_days,
+                                     c('','','',''))
+
+names(ma_days_normality_test) <- c('Male Group', 
+                                   'Number of observations',
+                                   'W statistics', 
+                                   'p_value',
+                                   'Distribution') 
+
+ma_days_normality_test <- ma_days_normality_test %>% 
+  mutate(Distribution = ifelse(p_value < 0.05, 'Not normal', 'Normal'))
+ma_days_normality_test
+
+
+```
+
+```{r echo=FALSE, message=FALSE, warning=FALSE, paged.print=TRUE}
+patients %>% 
+  filter(!is.na(days_in_hospital) & gender == 'male') %>%
+  ggplot(aes(y = days_in_hospital, x = drug_type)) +
+  geom_boxplot(na.rm = TRUE, aes(fill = factor(drug_type))) +
+  stat_boxplot(geom = "errorbar", width = 0.5) +  
+  stat_summary(na.rm = TRUE, fun = mean, colour = "darkred", geom = "point", 
+               size = 3) +
+  stat_summary(na.rm = TRUE, fun = mean, geom = "text", 
+               vjust=-0.7, aes(label = round(..y.., digits = 1))) +
+  scale_fill_discrete(name = "Drug type", labels = c('New type 1', 
+                                                  'New type 2', 
+                                                  'Old type', 
+                                                  'Placebo')) +
+  stat_summary(geom="text", fun=quantile,
+               aes(label=sprintf("%1.1f", ..y..)),
+               position=position_nudge(x=0.45), size=3.5) +
+  theme_bw() +
+  labs(title="Days in hospital for male patients",
+       subtitle = 'Means are marked in the center of the graph',
+       x = 'Drug type',
+       y = 'Days in hospital')
+
+```
+
+On the side of each graph are indicated: maximum value, 3rd quartile, median, 1st quartile, minimum value.
+
+
+## 3. Average and standard deviation for the numbers of day required for a recovery (regardless of the gender)
+
+```{r echo=FALSE, message=FALSE, warning=FALSE}
+average_number_of_days <- mean(patients$days_in_hospital, na.rm=TRUE)
+sd_number_of_days <- sd(patients$days_in_hospital, na.rm=TRUE)
+```
+
+The average for the numbers of day required for a recovery is `r average_number_of_days`.
+The standard deviation equals to `r sd_number_of_days`.
+
+## 4. Visualisation of days spent in hospital for male and female patients
+
+```{r echo=FALSE, message=FALSE, warning=FALSE}
+patients %>% 
+  filter(!is.na(days_in_hospital)) %>%
+  ggplot(aes(y = days_in_hospital, x = gender)) +
+  geom_boxplot(na.rm = TRUE, aes(fill = factor(gender))) +
+  stat_boxplot(geom = "errorbar", width = 0.5) +  
+  stat_summary(na.rm = TRUE, fun = mean, colour = "darkred", geom = "point", 
+               size = 3) +
+  stat_summary(na.rm = TRUE, fun = mean, geom = "text", 
+               vjust=-0.7, aes(label = round(..y.., digits = 1))) +
+  scale_fill_discrete(name = "Gender", labels = c("female", "male")) +
+  stat_summary(geom="text", fun=quantile,
+               aes(label=sprintf("%1.1f", ..y..)),
+               position=position_nudge(x=0.45), size=3.5) +
+  theme_bw() +
+  labs(title="Days in the hospital",
+       subtitle = 'Means are marked in the center of the graph',
+       x = 'Gender',
+       y = 'The number of days in the hospital')
+```
+
+## 5. An assumption about the difference between the number of days spent in hospital for female patients, that took in placebo and female patients who took drug type 2
+
+#### Data extraction ####
+
+At first, we extracted 2 vectors from our data frame:
+```{r message=FALSE, warning=FALSE}
+days_females_placebo <- patients %>% 
+  filter(gender=='female' & drug_type=='Placebo') %>%
+  pull(days_in_hospital)
+days_females_drug_2 <- patients %>% 
+  filter(gender=='female' & drug_type=='New_type_2') %>%
+  pull(days_in_hospital)
+
+```
+
+#### Normality check ####
+
+In the subsequent stage we need to check the distribution for normality:
+```{r message=FALSE, warning=FALSE}
+sh_placebo_5 <- shapiro.test(days_females_placebo)
+```
+W = `r sh_placebo_5$statistic`, p-value = `r sh_placebo_5$p.value`.
+
+According to the Shapiro-Wilk normality test, we cannot reject the null hypothesis (the distribution is normal).
+
+```{r message=FALSE, warning=FALSE}
+sh_drug2_5 <- shapiro.test(days_females_drug_2)
+```
+W = `r sh_drug2_5$statistic`, p-value = `r sh_drug2_5$p.value`.
+
+According to the Shapiro-Wilk normality test the the distribution in the second group can be considered not normal (p-value = 0.0182 < 0.05, the difference is statistically significant).
+
+#### Mann-Whitney U test ####
+
+The distribution in the second group is not normal, therefore we decided to use nonparametric Mann-Whitney U test. 
+
+Firstly, we used two-sided t-test:
+```{r echo=FALSE, message=FALSE, warning=FALSE}
+twosided_5 <- wilcox.test(x=days_females_placebo, y=days_females_drug_2, alternative = "two.sided")
+```
+W = `r twosided_5$statistic`, p-value = `r twosided_5$p.value`
+
+The differences are statistically significant (p-value is below the chosen threshold of 0.05), therefore we can reject the null hypothesis (P(X > Y) = P(X < Y)) in favor of the alternative hypothesis ('There is a statistically significant difference between the number of days spent in hospital for female patients, that took in placebo and female patients who took drug type 2').
+
+Then we used one-sided test:
+```{r echo=FALSE, message=FALSE, warning=FALSE}
+onesided_5 <- wilcox.test(x=days_females_placebo, y=days_females_drug_2, alternative = "greater")
+```
+W = `r onesided_5$statistic`, p-value = `r onesided_5$p.value`
+
+The differences are statistically significant (p-value is below the chosen threshold of 0.05), therefore we can reject the null hypothesis (P(X > Y) = P(X < Y)) in favor of the alternative hypothesis ('The number of days spent in hospital for female patients, that took in placebo was greater, than for female patients who took drug type 2').
+
+#### Visualization ####
+
+The difference between groups can be visualized via the boxplot:
+```{r echo=FALSE, message=FALSE, warning=FALSE}
+patients %>% 
+  filter(drug_type %in% c("Placebo", "New_type_2")) %>%
+  ggplot(aes(y = days_in_hospital, x = drug_type)) +
+  geom_boxplot(na.rm = TRUE, aes(fill = factor(drug_type))) +
+  stat_boxplot(geom = "errorbar", width = 0.5) +  
+  stat_summary(na.rm = TRUE, fun = mean, colour = "black", 
+               geom = "point", size = 3) +
+  theme_bw() +
+  labs(title="Difference between the number of days spent in the hospital
+for female patients, that took in placebo and female patients who took 
+drug type 2",
+       x = 'Drug type',
+       y = 'The number of days in hospital')
+```
+ 
